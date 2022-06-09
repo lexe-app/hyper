@@ -1,3 +1,4 @@
+#[cfg(not(target_env = "sgx"))]
 use socket2::TcpKeepalive;
 use std::fmt;
 use std::future::Future;
@@ -24,6 +25,7 @@ struct TcpKeepaliveConfig {
 
 impl TcpKeepaliveConfig {
     /// Converts into a `socket2::TcpKeealive` if there is any keep alive configuration.
+    #[cfg(not(target_env = "sgx"))]
     fn into_socket2(self) -> Option<TcpKeepalive> {
         let mut dirty = false;
         let mut ka = TcpKeepalive::new();
@@ -44,16 +46,19 @@ impl TcpKeepaliveConfig {
         }
     }
 
-    #[cfg(any(
-        target_os = "android",
-        target_os = "dragonfly",
-        target_os = "freebsd",
-        target_os = "fuchsia",
-        target_os = "illumos",
-        target_os = "linux",
-        target_os = "netbsd",
-        target_vendor = "apple",
-        windows,
+    #[cfg(all(
+        any(
+            target_os = "android",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "fuchsia",
+            target_os = "illumos",
+            target_os = "linux",
+            target_os = "netbsd",
+            target_vendor = "apple",
+            windows,
+        ),
+        not(target_env = "sgx"),
     ))]
     fn ka_with_interval(ka: TcpKeepalive, interval: Duration, dirty: &mut bool) -> TcpKeepalive {
         *dirty = true;
@@ -70,20 +75,24 @@ impl TcpKeepaliveConfig {
         target_os = "netbsd",
         target_vendor = "apple",
         windows,
+        target_env = "sgx",
     )))]
     fn ka_with_interval(ka: TcpKeepalive, _: Duration, _: &mut bool) -> TcpKeepalive {
         ka // no-op as keepalive interval is not supported on this platform
     }
 
-    #[cfg(any(
-        target_os = "android",
-        target_os = "dragonfly",
-        target_os = "freebsd",
-        target_os = "fuchsia",
-        target_os = "illumos",
-        target_os = "linux",
-        target_os = "netbsd",
-        target_vendor = "apple",
+    #[cfg(all(
+        any(
+            target_os = "android",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "fuchsia",
+            target_os = "illumos",
+            target_os = "linux",
+            target_os = "netbsd",
+            target_vendor = "apple",
+        ),
+        not(target_env = "sgx"),
     ))]
     fn ka_with_retries(ka: TcpKeepalive, retries: u32, dirty: &mut bool) -> TcpKeepalive {
         *dirty = true;
@@ -99,6 +108,7 @@ impl TcpKeepaliveConfig {
         target_os = "linux",
         target_os = "netbsd",
         target_vendor = "apple",
+        target_env = "sgx",
     )))]
     fn ka_with_retries(ka: TcpKeepalive, _: u32, _: &mut bool) -> TcpKeepalive {
         ka // no-op as keepalive retries is not supported on this platform
@@ -211,6 +221,7 @@ impl AddrIncoming {
         loop {
             match ready!(self.listener.poll_accept(cx)) {
                 Ok((socket, remote_addr)) => {
+                    #[cfg(not(target_env = "sgx"))]
                     if let Some(tcp_keepalive) = &self.tcp_keepalive_config.into_socket2() {
                         let sock_ref = socket2::SockRef::from(&socket);
                         if let Err(e) = sock_ref.set_tcp_keepalive(tcp_keepalive) {

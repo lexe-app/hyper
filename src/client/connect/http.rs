@@ -12,7 +12,7 @@ use std::time::Duration;
 use futures_util::future::Either;
 use http::uri::{Scheme, Uri};
 use pin_project_lite::pin_project;
-use tokio::net::{TcpSocket, TcpStream};
+use tokio::net::TcpStream;
 use tokio::time::Sleep;
 use tracing::{debug, trace, warn};
 
@@ -319,6 +319,7 @@ fn get_host_port<'u>(config: &Config, dst: &'u Uri) -> Result<(&'u str, u16), Co
     Ok((host, port))
 }
 
+#[cfg(not(target_env = "sgx"))]
 impl<R> HttpConnector<R>
 where
     R: Resolve,
@@ -355,6 +356,28 @@ where
         }
 
         Ok(sock)
+    }
+}
+
+#[cfg(target_env = "sgx")]
+impl<R> HttpConnector<R> {
+    async fn call_async(&mut self, dst: Uri) -> Result<TcpStream, ConnectError> {
+        let config = &self.config;
+        let connect_timeout = config.connect_timeout;
+
+        let (host, port) = get_host_port(config, &dst)?;
+        let addr = format!("{}:{}", host, port);
+
+        let connect = TcpStream::connect(addr);
+        match connect_timeout {
+            Some(dur) => match tokio::time::timeout(dur, connect).await {
+                Ok(Ok(s)) => Ok(s),
+                Ok(Err(e)) => Err(e),
+                Err(e) => Err(io::Error::new(io::ErrorKind::TimedOut, e)),
+            },
+            None => connect.await,
+        }
+        .map_err(ConnectError::m("tcp connect error"))
     }
 }
 
@@ -562,6 +585,7 @@ impl ConnectingTcpRemote {
     }
 }
 
+#[cfg(not(target_env = "sgx"))]
 fn bind_local_address(
     socket: &socket2::Socket,
     dst_addr: &SocketAddr,
@@ -590,6 +614,7 @@ fn bind_local_address(
     Ok(())
 }
 
+#[cfg(not(target_env = "sgx"))]
 fn connect(
     addr: &SocketAddr,
     config: &Config,
@@ -600,6 +625,7 @@ fn connect(
     // and avoid the unsafe `into_raw_fd`/`from_raw_fd` dance...
     use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
     use std::convert::TryInto;
+    use tokio::net::TcpSocket;
 
     let domain = Domain::for_address(*addr);
     let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))
@@ -664,6 +690,26 @@ fn connect(
     }
 
     let connect = socket.connect(*addr);
+    Ok(async move {
+        match connect_timeout {
+            Some(dur) => match tokio::time::timeout(dur, connect).await {
+                Ok(Ok(s)) => Ok(s),
+                Ok(Err(e)) => Err(e),
+                Err(e) => Err(io::Error::new(io::ErrorKind::TimedOut, e)),
+            },
+            None => connect.await,
+        }
+        .map_err(ConnectError::m("tcp connect error"))
+    })
+}
+
+#[cfg(target_env = "sgx")]
+fn connect(
+    addr: &SocketAddr,
+    _config: &Config,
+    connect_timeout: Option<Duration>,
+) -> Result<impl Future<Output = Result<TcpStream, ConnectError>>, ConnectError> {
+    let connect = TcpStream::connect(*addr);
     Ok(async move {
         match connect_timeout {
             Some(dur) => match tokio::time::timeout(dur, connect).await {
