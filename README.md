@@ -38,7 +38,7 @@ If you prefer chatting, there is an active community in the [Discord server][dis
 
 ## License
 
-hyper is provided under the MIT license. See [LICENSE](LICENSE).
+Please see LICENSE.md for license information.
 
 [discord-badge]: https://img.shields.io/discord/500028886025895936.svg?logo=discord
 [discord-url]: https://discord.gg/kkwpueZ
